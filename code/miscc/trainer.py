@@ -24,8 +24,6 @@ from miscc.losses import words_loss
 from miscc.losses import discriminator_loss, generator_loss, KL_loss
 from miscc.losses import negative_ddva
 
-from copy import deepcopy
-
 import os
 import time
 import numpy as np
@@ -59,16 +57,7 @@ class condGANTrainer(object):
         if cfg.TRAIN.NET_E == '':
             print('Error: no pretrained text-image encoders')
             return
-        
-        # vgg16 network
-        style_loss = VGGNet()
-        
-        
-        for p in style_loss.parameters():
-            p.requires_grad = False
 
-        print("Load the style loss model")
-        style_loss.eval()
 
         image_encoder = CNN_ENCODER(cfg.TEXT.EMBEDDING_DIM)
         img_encoder_path = cfg.TRAIN.NET_E.replace('text_encoder', 'image_encoder')
@@ -104,7 +93,6 @@ class condGANTrainer(object):
         else:
             from model import D_NET64, D_NET128, D_NET256
             netG = G_NET()
-            
             if cfg.TREE.BRANCH_NUM > 0:
                 netsD.append(D_NET64())
             if cfg.TREE.BRANCH_NUM > 1:
@@ -112,7 +100,7 @@ class condGANTrainer(object):
             if cfg.TREE.BRANCH_NUM > 2:
                 netsD.append(D_NET256())
         netG.apply(weights_init)
-        
+
         for i in range(len(netsD)):
             netsD[i].apply(weights_init)
         print('# of netsD', len(netsD))
@@ -122,7 +110,6 @@ class condGANTrainer(object):
             state_dict = \
                 torch.load(cfg.TRAIN.NET_G, map_location=lambda storage, loc: storage)
             netG.load_state_dict(state_dict)
-            
             print('Load G from: ', cfg.TRAIN.NET_G)
             istart = cfg.TRAIN.NET_G.rfind('_') + 1
             iend = cfg.TRAIN.NET_G.rfind('.')
@@ -137,30 +124,17 @@ class condGANTrainer(object):
                     state_dict = \
                         torch.load(Dname, map_location=lambda storage, loc: storage)
                     netsD[i].load_state_dict(state_dict)
-                    
-        # Create a target network.
-        target_netG = deepcopy(netG)
 
         if cfg.CUDA:
             text_encoder = text_encoder.cuda()
             image_encoder = image_encoder.cuda()
-            style_loss = style_loss.cuda()     
-            
-            # The target network is stored on the scondary GPU.---------------------------------
-            target_netG.cuda(secondary_device) 
-            target_netG.ca_net.device = secondary_device
-            #-----------------------------------------------------------------------------------
-            
+            image_encoder = image_encoder.to(secondary_device)
             netG.cuda()
             for i in range(len(netsD)):
-                netsD[i]=  netsD[i].cuda()
+                netsD[i].cuda()
+                netsD[i]=  netsD[i].to(secondary_device)
 
-                
-        # Disable training in the target network:
-        for p in target_netG.parameters():
-            p.requires_grad = False            
-                
-        return [text_encoder, image_encoder, netG, target_netG, netsD, epoch, style_loss]
+        return [text_encoder, image_encoder, netG, netsD, epoch]
 
     def define_optimizers(self, netG, netsD):
         optimizersD = []
@@ -190,17 +164,16 @@ class condGANTrainer(object):
         return real_labels, fake_labels, match_labels
 
     def save_model(self, netG, avg_param_G, netsD, epoch):
-        save_dir = '/scratch/scratch2/adsue/checkpoints'
         backup_para = copy_G_params(netG)
         load_params(netG, avg_param_G)
         torch.save(netG.state_dict(),
-            '%s/netG_epoch_%d.pth' % (save_dir, epoch))
+            '%s/netG_epoch_%d.pth' % (self.model_dir, epoch))
         load_params(netG, backup_para)
         #
         for i in range(len(netsD)):
             netD = netsD[i]
             torch.save(netD.state_dict(),
-                '%s/netD%d.pth' % (save_dir, i))
+                '%s/netD%d.pth' % (self.model_dir, i))
         print('Save G/Ds models.')
 
     def set_requires_grad_value(self, models_list, brequires):
@@ -249,7 +222,7 @@ class condGANTrainer(object):
             im.save(fullpath)
 
     def train(self):
-        text_encoder, image_encoder, netG, target_netG, netsD, start_epoch, style_loss = self.build_models()
+        text_encoder, image_encoder, netG, netsD, start_epoch = self.build_models()
         avg_param_G = copy_G_params(netG)
         optimizerG, optimizersD = self.define_optimizers(netG, netsD)
         real_labels, fake_labels, match_labels = self.prepare_labels()
@@ -312,14 +285,8 @@ class condGANTrainer(object):
                 if i_mask.size(1) > i_num_words:
                     i_mask = i_mask[:, :i_num_words]
 
-                # Move tensors to the secondary device.
-                noise  = noise.to(secondary_device) # IMPORTANT! We are reusing the same noise.
-                i_sent_emb = i_sent_emb.to(secondary_device)
-                i_words_embs = i_words_embs.to(secondary_device)
-                i_mask = i_mask.to(secondary_device)
-                                
-                # Generate images.
-                imperfect_fake_imgs, _, _, _ = target_netG(noise, i_sent_emb, i_words_embs, i_mask)   
+                noise.data.normal_(0, 1)
+                imperfect_fake_imgs, _, _, _ = netG(noise, i_sent_emb, i_words_embs, i_mask)
                     
                 # Sort the results by keys to align ------------------------------------------------------------------------
                 bag = [sent_emb, real_labels, fake_labels, words_embs, class_ids, w_words_embs, wrong_caps_len, wrong_cls_id]
@@ -329,13 +296,12 @@ class condGANTrainer(object):
                     
                 sent_emb, real_labels, fake_labels, words_embs, class_ids, w_words_embs, wrong_caps_len, wrong_cls_id = \
                             sorted_bag
-                 
+                
                 imperfect_keys, imperfect_captions, imperfect_cap_lens, imperfect_fake_imgs, imgs, _ = \
                             sort_by_keys(imperfect_keys, imperfect_captions, imperfect_cap_lens, imperfect_fake_imgs, imgs,None)
                     
                 #-----------------------------------------------------------------------------------------------------------
                 
-                                
                 errD_total = 0
                 D_logs = ''
                 for i in range(len(netsD)):
@@ -356,7 +322,7 @@ class condGANTrainer(object):
                 netG.zero_grad()
                 errG_total, G_logs = \
                     generator_loss(netsD, image_encoder, fake_imgs, real_labels,
-                                   words_embs, sent_emb, match_labels, cap_lens, class_ids, style_loss, imgs)
+                                   words_embs, sent_emb, match_labels, cap_lens, class_ids, imgs)
                 kl_loss = KL_loss(mu, logvar)
                 
                 errG_total += kl_loss
@@ -364,17 +330,12 @@ class condGANTrainer(object):
                 G_logs += 'kl_loss: %.2f ' % kl_loss
                 
                 
-                # Shift device for the imgs and target_imgs.-----------------------------------------------------
-                for i in range(len(imgs)):
-                    imgs[i] = imgs[i].to(secondary_device)
-                    fake_imgs[i] = fake_imgs[i].to(secondary_device)
-                
                 # Compute and add ddva loss ---------------------------------------------------------------------
                 neg_ddva = negative_ddva(imperfect_fake_imgs, imgs, fake_imgs)
-                neg_ddva *= 1000. # Scale so that the ddva score is not overwhelmed by other losses.
-                errG_total += neg_ddva.to(cfg.GPU_ID)
+                
+                errG_total += neg_ddva
+                
                 G_logs += 'negative_ddva_loss: %.2f ' % neg_ddva
-                #------------------------------------------------------------------------------------------------
                 
                 errG_total.backward()
                 
@@ -385,23 +346,28 @@ class condGANTrainer(object):
                 if gen_iterations % 100 == 0:
                     print(D_logs + '\n' + G_logs)
 
-                # Copy parameters to the target network.
-                if gen_iterations % 100 == 0:
-                    load_params(target_netG, copy_G_params(netG))
+                # save images
+                #if gen_iterations % 1000 == 0:
+                #    backup_para = copy_G_params(netG)
+                #    load_params(netG, avg_param_G)
+                #    self.save_img_results(netG, fixed_noise, sent_emb,
+                #                          words_embs, mask, image_encoder,
+                #                          captions, cap_lens, epoch, name='average')
+                #    load_params(netG, backup_para)
+                break
 
             end_t = time.time()
 
             print('''[%d/%d][%d]
-                  Loss_D: %.2f Loss_G: %.2f neg_ddva: %.2f Time: %.2fs'''
+                  Loss_D: %.2f Loss_G: %.2f Time: %.2fs'''
                   % (epoch, self.max_epoch, self.num_batches,
                      errD_total, errG_total,
-                     neg_ddva,
                      end_t - start_t))
 
-            if epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0: 
-                self.save_model(netG, avg_param_G, netsD, epoch)
+         #   if epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0: 
+         #       self.save_model(netG, avg_param_G, netsD, epoch)
 
-        self.save_model(netG, avg_param_G, netsD, self.max_epoch)
+        #self.save_model(netG, avg_param_G, netsD, self.max_epoch)
 
     def save_singleimages(self, images, filenames, save_dir,
                           split_dir, sentenceID=0):

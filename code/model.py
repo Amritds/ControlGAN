@@ -276,6 +276,7 @@ class CA_NET(nn.Module):
         self.c_dim = cfg.GAN.CONDITION_DIM
         self.fc = nn.Linear(self.t_dim, self.c_dim * 4, bias=True)
         self.relu = GLU()
+        self.device = cfg.GPU_ID
 
     def encode(self, text_embedding):
         x = self.relu(self.fc(text_embedding))
@@ -287,6 +288,7 @@ class CA_NET(nn.Module):
         std = logvar.mul(0.5).exp_()
         if cfg.CUDA:
             eps = torch.cuda.FloatTensor(std.size()).normal_()
+            eps = eps.to(self.device)
         else:
             eps = torch.FloatTensor(std.size()).normal_()
         eps = Variable(eps)

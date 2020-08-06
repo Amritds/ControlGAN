@@ -8,6 +8,42 @@ from attention import func_attention
 import torch.nn.functional as F
 import torchvision.models as models
 from torch.autograd import Variable
+
+from resnet_features import resnet_encoder
+
+secondary_device = torch.device("cuda:"+str(cfg.secondary_GPU_ID))
+
+#-------------------------- Compute DDVA score ------------------------------------------------------------------
+
+img_encoder = resnet_encoder().to(secondary_device)
+
+def negative_ddva(imperfect_fake_imgs, imgs, fake_imgs, reduce='mean', final_only=False):
+    
+    if final_only:
+        neg_ddva = compute_ddva(imperfect_fake_imgs[-1], imgs[-1], fake_imgs[-1]) * (-1)
+    else:
+        neg_ddva = 0
+        for i in range(len(imgs)):
+            batch_ddva = compute_ddva(imperfect_fake_imgs[i], imgs[i], fake_imgs[i])
+            neg_ddva += batch_ddva * (-1)
+        
+    if reduce=='mean':
+        return torch.sum(neg_ddva)/len(neg_ddva)
+    
+    return neg_ddva
+               
+        
+def compute_ddva(A, B, C):       
+    A = img_encoder(A)
+    B = img_encoder(B)
+    C = img_encoder(C)
+    dist_AB = torch.sqrt(torch.sum(torch.pow(A - B, 2), dim=1))
+    dist_CB = torch.sqrt(torch.sum(torch.pow(C - B, 2), dim=1))
+    
+    ddva = dist_AB - dist_CB
+    return ddva
+    
+
 # ##################Loss for matching text-image###################
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     """Returns cosine similarity between x1 and x2, computed along dim.
@@ -118,7 +154,7 @@ def words_loss(img_features, words_emb, labels,
 def discriminator_loss(netD, real_imgs, fake_imgs, conditions,
                        real_labels, fake_labels, words_embs, cap_lens, image_encoder, class_ids,
                         w_words_embs, wrong_caps_len, wrong_cls_id):
-
+ 
     real_features = netD(real_imgs)
     fake_features = netD(fake_imgs.detach())
     #
@@ -191,7 +227,7 @@ def generator_loss(netsD, image_encoder, fake_imgs, real_labels,
 
             errG_total += w_loss + s_loss
             logs += 'w_loss: %.2f s_loss: %.2f ' % (w_loss, s_loss)
-
+            
         fake_img = fake_imgs[i]
         real_img = real_imgs[i]
 
@@ -200,7 +236,10 @@ def generator_loss(netsD, image_encoder, fake_imgs, real_labels,
         perceptual_loss += F.mse_loss(real_features, fake_features) 
 
     logs += 'perceptual_loss: %.2f ' % (perceptual_loss / 3.)
+    print('Discriminator error: ', errG_total)
     errG_total += perceptual_loss / 3.
+    
+    print('PERCEPTUAL_LOSS: ', perceptual_loss / 3.)
 
     return errG_total, logs
 

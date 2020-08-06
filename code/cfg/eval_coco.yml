@@ -3,9 +3,10 @@ CONFIG_NAME: 'ControlGAN'
 DATASET_NAME: 'coco'
 DATA_DIR: '../data/coco'
 GPU_ID: 0
+secondary_GPU_ID: 1
 WORKERS: 1
 
-B_VALIDATION: False # True
+B_VALIDATION: True
 TREE:
     BRANCH_NUM: 3
 
