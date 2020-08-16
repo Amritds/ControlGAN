@@ -391,7 +391,7 @@ class TextDataset(data.Dataset):
             data_dir = self.data_dir
 
         #img_name = '%s/images/%s.jpg' % (data_dir, key)
-        img_name = '/scratch/scratch2/adsue/caption_dataset/train2014/%s.jpg' % (key)
+        img_name = '/scratch/scratch2/adsue/caption_dataset/val2014/%s.jpg' % (key)
         imgs= get_imgs(img_name, self.imsize,
                        bbox, self.transform, normalize=self.norm)
         

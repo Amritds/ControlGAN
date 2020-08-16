@@ -231,15 +231,15 @@ def generator_loss(netsD, image_encoder, fake_imgs, real_labels,
         fake_img = fake_imgs[i]
         real_img = real_imgs[i]
 
-        real_features = style_loss(real_img)[0]
-        fake_features = style_loss(fake_img)[0]
-        perceptual_loss += F.mse_loss(real_features, fake_features) 
+        #real_features = style_loss(real_img)[0]
+        #fake_features = style_loss(fake_img)[0]
+        #perceptual_loss += F.mse_loss(real_features, fake_features) 
 
-    logs += 'perceptual_loss: %.2f ' % (perceptual_loss / 3.)
+    #logs += 'perceptual_loss: %.2f ' % (perceptual_loss / 3.)
     print('Discriminator error: ', errG_total)
-    errG_total += perceptual_loss / 3.
+    #errG_total += perceptual_loss / 3.
     
-    print('PERCEPTUAL_LOSS: ', perceptual_loss / 3.)
+    #print('PERCEPTUAL_LOSS: ', perceptual_loss / 3.)
 
     return errG_total, logs
 

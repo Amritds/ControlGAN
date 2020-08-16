@@ -12,13 +12,13 @@ TREE:
 
 TRAIN:
     FLAG: True
-    NET_G: '../output/coco_ControlGAN_2020_07_29_14_44_27/Model/netG_epoch_104.pth' 
+    NET_G: '/scratch/scratch2/adsue/checkpoints3/netG_epoch_102.pth' 
     B_NET_D: True
     BATCH_SIZE: 8
     MAX_EPOCH: 200
     SNAPSHOT_INTERVAL: 1
     DISCRIMINATOR_LR: 0.0002
-    GENERATOR_LR: 0.0002
+    GENERATOR_LR: 0.000002
     #
     NET_E: '../DAMSMencoders/coco/text_encoder.pth'
     SMOOTH:

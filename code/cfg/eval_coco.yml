@@ -13,7 +13,7 @@ TREE:
 
 TRAIN:
     FLAG: False
-    NET_G: '../models/coco_ControlGAN.pth'
+    NET_G: '/scratch/scratch2/adsue/checkpoints3/netG_epoch_103.pth'
     B_NET_D: False
     BATCH_SIZE: 5 
     NET_E: '../DAMSMencoders/coco/text_encoder.pth'

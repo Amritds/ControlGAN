@@ -190,7 +190,7 @@ class condGANTrainer(object):
         return real_labels, fake_labels, match_labels
 
     def save_model(self, netG, avg_param_G, netsD, epoch):
-        save_dir = '/scratch/scratch2/adsue/checkpoints3'
+        save_dir = '/scratch/scratch2/adsue/checkpoints2'
         backup_para = copy_G_params(netG)
         load_params(netG, avg_param_G)
         torch.save(netG.state_dict(),
@@ -262,8 +262,7 @@ class condGANTrainer(object):
             noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
 
         gen_iterations = 0
-        sliding_window = []
-        
+
         for epoch in range(start_epoch, self.max_epoch):
             start_t = time.time()
 
@@ -312,13 +311,13 @@ class condGANTrainer(object):
                 
                 if i_mask.size(1) > i_num_words:
                     i_mask = i_mask[:, :i_num_words]
-                
+
                 # Move tensors to the secondary device.
                 noise  = noise.to(secondary_device) # IMPORTANT! We are reusing the same noise.
                 i_sent_emb = i_sent_emb.to(secondary_device)
                 i_words_embs = i_words_embs.to(secondary_device)
                 i_mask = i_mask.to(secondary_device)
-                
+                                
                 # Generate images.
                 imperfect_fake_imgs, _, _, _ = target_netG(noise, i_sent_emb, i_words_embs, i_mask)   
                     
@@ -337,45 +336,44 @@ class condGANTrainer(object):
                 #-----------------------------------------------------------------------------------------------------------
                 
                                 
-                #errD_total = 0
-                #D_logs = ''
-                #for i in range(len(netsD)):
-                #    netsD[i].zero_grad()
-                #    errD = discriminator_loss(netsD[i], imgs[i], fake_imgs[i],
-                #                              sent_emb, real_labels, fake_labels,
-                #                              words_embs, cap_lens, image_encoder, class_ids, w_words_embs, 
-                #                              wrong_caps_len, wrong_cls_id)
-                #    # backward and update parameters
-                #    errD.backward(retain_graph=True)
-                #    optimizersD[i].step()
-                #    errD_total += errD
-                #    D_logs += 'errD%d: %.2f ' % (i, errD)
+                errD_total = 0
+                D_logs = ''
+                for i in range(len(netsD)):
+                    netsD[i].zero_grad()
+                    errD = discriminator_loss(netsD[i], imgs[i], fake_imgs[i],
+                                              sent_emb, real_labels, fake_labels,
+                                              words_embs, cap_lens, image_encoder, class_ids, w_words_embs, 
+                                              wrong_caps_len, wrong_cls_id)
+                    # backward and update parameters
+                    errD.backward(retain_graph=True)
+                    optimizersD[i].step()
+                    errD_total += errD
+                    D_logs += 'errD%d: %.2f ' % (i, errD)
 
                 step += 1
                 gen_iterations += 1
 
                 netG.zero_grad()
-                #errG_total, G_logs = \
-                #    generator_loss(netsD, image_encoder, fake_imgs, real_labels,
-                #                   words_embs, sent_emb, match_labels, cap_lens, class_ids, style_loss, imgs)
-                #kl_loss = KL_loss(mu, logvar)
+                errG_total, G_logs = \
+                    generator_loss(netsD, image_encoder, fake_imgs, real_labels,
+                                   words_embs, sent_emb, match_labels, cap_lens, class_ids, style_loss, imgs)
+                kl_loss = KL_loss(mu, logvar)
                 
-                #errG_total += kl_loss
+                errG_total += kl_loss
                 
-                #G_logs += 'kl_loss: %.2f ' % kl_loss
+                G_logs += 'kl_loss: %.2f ' % kl_loss
                 
                 
-                # Shift device -----------------------------------------------------
+                # Shift device for the imgs and target_imgs.-----------------------------------------------------
                 for i in range(len(imgs)):
                     imgs[i] = imgs[i].to(secondary_device)
                     fake_imgs[i] = fake_imgs[i].to(secondary_device)
-                   
                 
                 # Compute and add ddva loss ---------------------------------------------------------------------
                 neg_ddva = negative_ddva(imperfect_fake_imgs, imgs, fake_imgs)
-                neg_ddva *= 1. # Scale so that the ddva score is not overwhelmed by other losses.
-                errG_total = neg_ddva.to(cfg.GPU_ID)
-                #G_logs += 'negative_ddva_loss: %.2f ' % neg_ddva
+                neg_ddva *= 10. # Scale so that the ddva score is not overwhelmed by other losses.
+                errG_total += neg_ddva.to(cfg.GPU_ID)
+                G_logs += 'negative_ddva_loss: %.2f ' % neg_ddva
                 #------------------------------------------------------------------------------------------------
                 
                 errG_total.backward()
@@ -384,27 +382,21 @@ class condGANTrainer(object):
                 for p, avg_p in zip(netG.parameters(), avg_param_G):
                     avg_p.mul_(0.999).add_(0.001, p.data)
 
-                if len(sliding_window)==100:
-                	del sliding_window[0]
-                sliding_window.append(neg_ddva)
-                sliding_avg_ddva =  sum(sliding_window)/len(sliding_window)
-
-                print('sliding_window avg NEG DDVA: ',sliding_avg_ddva)
-                #if gen_iterations % 100 == 0:
-                #    print(D_logs + '\n' + G_logs)
+                if gen_iterations % 100 == 0:
+                    print(D_logs + '\n' + G_logs)
 
                 # Copy parameters to the target network.
-                #if gen_iterations % 5 == 0:
-                load_params(target_netG, copy_G_params(netG))
+                if gen_iterations % 20 == 0:
+                    load_params(target_netG, copy_G_params(netG))
 
             end_t = time.time()
 
-            #print('''[%d/%d][%d]
-            #      Loss_D: %.2f Loss_G: %.2f neg_ddva: %.2f Time: %.2fs'''
-            #      % (epoch, self.max_epoch, self.num_batches,
-            #         errD_total, errG_total,
-            #         neg_ddva,
-            #         end_t - start_t))
+            print('''[%d/%d][%d]
+                  Loss_D: %.2f Loss_G: %.2f neg_ddva: %.2f Time: %.2fs'''
+                  % (epoch, self.max_epoch, self.num_batches,
+                     errD_total, errG_total,
+                     neg_ddva,
+                     end_t - start_t))
 
             if epoch % cfg.TRAIN.SNAPSHOT_INTERVAL == 0: 
                 self.save_model(netG, avg_param_G, netsD, epoch)
